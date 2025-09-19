@@ -1,0 +1,91 @@
+# FAIRe2BioSample Configuration File
+
+# =============================================================================
+# CONFIGURATION FILE HANDLING
+# =============================================================================
+# File overwrite prompts
+CONFIGURATION_FILE_HANDLING:
+  'Configuration file PATH already exists. Do you want to overwrite it? [y/N]:': 'y'
+
+# =============================================================================
+# OUTPUT FILE OVERWRITE
+# =============================================================================
+# Output file overwrite prompts
+OUTPUT_FILE_OVERWRITE:
+  'File PATH already exists. Overwrite? [y/N]:': ''
+
+# =============================================================================
+# BIOPROJECT ACCESSION HANDLING
+# =============================================================================
+# Bioproject accession configuration for grouping samples by expedition
+BIOPROJECT_ACCESSION_HANDLING:
+  'No bioproject_accession provided. Do you want to enter values manually? [y/N]:': 'y'
+
+
+# =============================================================================
+# MANDATORY FIELDS HANDLING
+# =============================================================================
+# Configuration for handling empty mandatory fields (marked with *)
+MANDATORY_FIELDS_HANDLING:
+  'Column FIELD_NAME is empty. Do you want to fill it with not collected, not applicable, or missing? (Or enter any other value, or leave blank to skip):': {}
+
+# =============================================================================
+# NUMERICAL COLUMNS WITH UNITS
+# =============================================================================
+# Unit configuration for numerical columns in BioSample metadata
+NUMERICAL_COLUMNS_WITH_UNITS:
+  'Enter unit for COLUMN_NAME (or press Enter to skip):':
+    'Enter unit for maximumDepthInMeters (or press Enter to skip):': 'm'
+    'Enter unit for salinity (or press Enter to skip):': 'psu'
+    'Enter unit for size_frac (or press Enter to skip):': 'micrometer'
+    'Enter unit for temp (or press Enter to skip):': 'degree celsius'
+    'Enter unit for tot_depth_water_col (or press Enter to skip):': 'm'
+
+# =============================================================================
+# DUPLICATE ROW CHECKING
+# =============================================================================
+# Configuration for handling duplicate rows in the output
+DUPLICATE_ROW_CHECKING:
+  'Do you want to add a column from FAIReMetadata to help resolve duplicates? [y/N]:': 'Y'
+
+# =============================================================================
+# SAMPLE TITLE GENERATION
+# =============================================================================
+# Configuration for generating sample_title column values
+SAMPLE_TITLE_GENERATION:
+  'Do you want to add values in the sample_title column? [y/N]:': 'y'
+  'Do you want to use the default parameters from the script: *geo_loc_name, *organism, *sample_name? [Y/n]:': 'Y'
+  'Enter column numbers separated by commas (e.g., 1,3,5) or column names separated by commas:': ''
+  'Columns to concatenate:': ''
+
+# =============================================================================
+# ADDITIONAL COLUMNS FROM SAMPLE METADATA
+# =============================================================================
+# Configuration for adding additional columns from FAIReMetadata to BioSampleMetadata
+ADDITIONAL_COLUMNS_FROM_SAMPLE_METADATA:
+  'Do you want to add ALL of these columns to BioSampleMetadata? [Y/n]:': 'n'
+  'Enter column numbers separated by commas (e.g., 1,3,5) to EXCLUDE:': ''
+  'Or enter none to exclude none (add all):': ''
+  'Columns to exclude:': ''
+
+
+# =============================================================================
+# NOTES ON USAGE
+# =============================================================================
+# This configuration file contains all user responses from the FAIRe2BioSample script.
+# 
+# Key sections (in chronological order):
+# - CONFIGURATION_FILE_HANDLING: File overwrite prompts
+# - OUTPUT_FILE_OVERWRITE: Output file overwrite prompts
+# - BIOPROJECT_ACCESSION_HANDLING: Bioproject accession configuration per expedition
+# - MANDATORY_FIELDS_HANDLING: Handling of empty mandatory fields
+# - NUMERICAL_COLUMNS_WITH_UNITS: Unit configuration for numerical columns
+# - DUPLICATE_ROW_CHECKING: Duplicate row resolution settings
+# - SAMPLE_TITLE_GENERATION: Sample title column generation settings
+# - ADDITIONAL_COLUMNS_FROM_SAMPLE_METADATA: Additional column selection
+# - generated_files: List of files created by the script
+# 
+# To reuse this configuration:
+# 1. Run the script with --config_file path/to/this/file.yaml
+# 2. The script will use saved answers and skip prompts
+# 3. Only missing answers will prompt for user input

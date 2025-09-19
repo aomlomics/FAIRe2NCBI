@@ -1,0 +1,73 @@
+# FAIRe2SRA Configuration File
+
+# =============================================================================
+# CONFIGURATION FILE HANDLING
+# =============================================================================
+CONFIGURATION_FILE_HANDLING:
+  'Configuration file PATH already exists. Do you want to overwrite it? [y/N]:': ''
+
+# =============================================================================
+# OUTPUT FILE OVERWRITE
+# =============================================================================
+OUTPUT_FILE_OVERWRITE:
+  'File PATH already exists. Overwrite? [y/N]:': ''
+
+# =============================================================================
+# ASSAY SELECTION
+# =============================================================================
+ASSAY_SELECTION:
+  'Do you want to use all assays or only specific ones? [all/specific]:': 'all'
+  'Selected assays:': ''
+
+# =============================================================================
+# LIBRARY FIELD CONFIGURATION
+# =============================================================================
+LIBRARY_FIELD_CONFIGURATION:
+  'Use default value or choose from allowed values? [default/Other]:':
+    '  Use default value or choose from allowed values for library_strategy? [default/Other]: ': 'default'
+    '  Use default value or choose from allowed values for library_source? [default/Other]: ': 'default'
+    '  Use default value or choose from allowed values for library_selection? [default/Other]: ': 'default'
+  'Enter FIELD_NAME value (number or term):':
+    '  Enter library_strategy value (number or term): ': ''
+    '  Enter library_source value (number or term): ': ''
+    '  Enter library_selection value (number or term): ': ''
+
+# =============================================================================
+# PLATFORM VALUES CONFIGURATION
+# =============================================================================
+PLATFORM_VALUES_CONFIGURATION:
+  'Which one do you want to use? [Assay/Project]:': {}
+  'Enter platform value (number or name):': {}
+
+# =============================================================================
+# INSTRUMENT MODEL VALUES CONFIGURATION
+# =============================================================================
+INSTRUMENT_MODEL_VALUES_CONFIGURATION:
+  'Which one do you want to use? [Assay/Project]:': ''
+  'No instrument model value found for assay. Do you want to add a value manually? [y/N]:': {}
+  'Enter instrument model number or type Other value:': {}
+
+# =============================================================================
+# GENERATED FILES TRACKING
+# =============================================================================
+# List of files created by the script
+generated_files: []
+
+# =============================================================================
+# NOTES ON USAGE
+# =============================================================================
+# This configuration file contains all user responses from the FAIRe2SRA script.
+# 
+# Key sections:
+# - CONFIGURATION_FILE_HANDLING: File overwrite prompts
+# - OUTPUT_FILE_OVERWRITE: Output file overwrite prompts
+# - ASSAY_SELECTION: Assay selection and filtering
+# - LIBRARY_FIELD_CONFIGURATION: Library strategy, source, and selection settings
+# - PLATFORM_VALUES_CONFIGURATION: Platform value choices per assay
+# - INSTRUMENT_MODEL_VALUES_CONFIGURATION: Instrument model choices per assay
+# - generated_files: List of files created by the script
+# 
+# To reuse this configuration:
+# 1. Run the script with --config_file path/to/this/file.yaml
+# 2. The script will use saved answers and skip prompts
+# 3. Only missing answers will prompt for user input

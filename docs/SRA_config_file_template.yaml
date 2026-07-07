@@ -23,10 +23,10 @@ ASSAY_SELECTION:
 # LIBRARY FIELD CONFIGURATION
 # =============================================================================
 LIBRARY_FIELD_CONFIGURATION:
-  'Use default value or choose from allowed values? [default/Other]:':
-    '  Use default value or choose from allowed values for library_strategy? [default/Other]: ': 'default'
-    '  Use default value or choose from allowed values for library_source? [default/Other]: ': 'default'
-    '  Use default value or choose from allowed values for library_selection? [default/Other]: ': 'default'
+  'Use default value or choose from allowed values? [DEFAULT/Other]:':
+    '  Use default value or choose from allowed values for library_strategy? [DEFAULT/Other]: ': 'DEFAULT'
+    '  Use default value or choose from allowed values for library_source? [DEFAULT/Other]: ': 'DEFAULT'
+    '  Use default value or choose from allowed values for library_selection? [DEFAULT/Other]: ': 'DEFAULT'
   'Enter FIELD_NAME value (number or term):':
     '  Enter library_strategy value (number or term): ': ''
     '  Enter library_source value (number or term): ': ''

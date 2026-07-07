@@ -20,6 +20,8 @@ OUTPUT_FILE_OVERWRITE:
 # Bioproject accession configuration for grouping samples by expedition
 BIOPROJECT_ACCESSION_HANDLING:
   'No bioproject_accession provided. Do you want to enter values manually? [y/N]:': 'y'
+  # all = use every distinct value of the grouping field; specific = choose a subset
+  'Do you want to use all values in FIELD, or only specific ones? [all/specific]:': 'all'
 
 
 # =============================================================================

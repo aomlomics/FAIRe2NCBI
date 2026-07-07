@@ -42,8 +42,12 @@ except ImportError:
                 return response
             print(f"Invalid choice. Please enter one of: {', '.join(valid_choices)}")
 
-
-
+from paths import (
+    BIOSAMPLE_CONFIG_TEMPLATE_NAME,
+    DEFAULT_BIOSAMPLE_TEMPLATE,
+    get_docs_path,
+    resolve_input_path,
+)
 
 
 def is_bioproject_accession_column(col_name):
@@ -64,6 +68,50 @@ def get_config_file_path(output_file_path):
     # Remove extension and add _config.yaml
     base_path = os.path.splitext(output_file_path)[0]
     return f"{base_path}_config.yaml"
+
+
+def get_config_template_path(template_filename=BIOSAMPLE_CONFIG_TEMPLATE_NAME):
+    """Return the path to a config template YAML file in the docs/ directory."""
+    return str(get_docs_path(template_filename))
+
+
+def is_config_template_file(config_file_path, template_filename=BIOSAMPLE_CONFIG_TEMPLATE_NAME):
+    """Check whether a config file path refers to the bundled config template."""
+    template_path = get_config_template_path(template_filename)
+    abs_config_file = os.path.abspath(config_file_path)
+    abs_template_path = os.path.abspath(template_path)
+    config_filename = os.path.basename(config_file_path)
+    template_basename = os.path.basename(template_path)
+    return (abs_config_file == abs_template_path) or (config_filename == template_basename)
+
+
+def prompt_config_source_choice():
+    """
+    Ask whether to reuse a previous config, start from the template, or run interactively.
+
+    Returns:
+        str: One of 'previous', 'template', or 'interactive'
+    """
+    choice = get_valid_user_choice(
+        "Do you want to use a config file from a previous run or use the template? "
+        "[previous/template/interactive]: ",
+        ['previous', 'template', 'interactive', 'p', 't', 'i'],
+        default='interactive'
+    )
+    if choice in ('p', 'previous'):
+        return 'previous'
+    if choice in ('t', 'template'):
+        return 'template'
+    return 'interactive'
+
+
+def prompt_previous_config_path():
+    """Prompt until the user provides an existing config file path."""
+    while True:
+        config_path = input("Enter path to config file from a previous run: ").strip()
+        if config_path and os.path.exists(config_path):
+            return config_path
+        print("File not found. Please enter a valid path.")
 
 
 
@@ -151,12 +199,33 @@ def update_structured_config(config, question, answer):
         if 'BIOPROJECT_ACCESSION_HANDLING' not in config:
             config['BIOPROJECT_ACCESSION_HANDLING'] = {}
         config['BIOPROJECT_ACCESSION_HANDLING']['Enter field number (1-X) or field name to group samples:'] = answer
+    elif "only specific ones" in question and "[all/specific]" in question:
+        if 'BIOPROJECT_ACCESSION_HANDLING' not in config:
+            config['BIOPROJECT_ACCESSION_HANDLING'] = {}
+        config['BIOPROJECT_ACCESSION_HANDLING'][
+            'Do you want to use all values in FIELD, or only specific ones? [all/specific]:'] = answer
+    elif "Selected values for field '" in question and "numbers separated by commas" in question:
+        m = re.search(r"Selected values for field '([^']+)'", question)
+        if m:
+            fld = m.group(1)
+            if 'BIOPROJECT_ACCESSION_HANDLING' not in config:
+                config['BIOPROJECT_ACCESSION_HANDLING'] = {}
+            if 'Selected values for FIELD (numbers separated by commas):' not in config['BIOPROJECT_ACCESSION_HANDLING']:
+                config['BIOPROJECT_ACCESSION_HANDLING']['Selected values for FIELD (numbers separated by commas):'] = {}
+            if not isinstance(config['BIOPROJECT_ACCESSION_HANDLING']['Selected values for FIELD (numbers separated by commas):'], dict):
+                config['BIOPROJECT_ACCESSION_HANDLING']['Selected values for FIELD (numbers separated by commas):'] = {}
+            config['BIOPROJECT_ACCESSION_HANDLING']['Selected values for FIELD (numbers separated by commas):'][fld] = answer
     elif "Enter bioproject_accession for" in question:
         if 'BIOPROJECT_ACCESSION_HANDLING' not in config:
             config['BIOPROJECT_ACCESSION_HANDLING'] = {}
         if 'Enter bioproject_accession for FIELD = VALUE:' not in config['BIOPROJECT_ACCESSION_HANDLING']:
             config['BIOPROJECT_ACCESSION_HANDLING']['Enter bioproject_accession for FIELD = VALUE:'] = {}
         config['BIOPROJECT_ACCESSION_HANDLING']['Enter bioproject_accession for FIELD = VALUE:'][question] = answer
+    elif "[all/blank_only]" in question and "experimentRunMetadata" in question and "associatedSequences" in question:
+        if 'EXPERIMENT_RUN_METADATA_FILTER' not in config:
+            config['EXPERIMENT_RUN_METADATA_FILTER'] = {}
+        config['EXPERIMENT_RUN_METADATA_FILTER'][
+            'Do you want to keep all samples in the BioSample output, or only samp_name values that have blank/NA associatedSequences in the experimentRunMetadata sheet? [all/blank_only]:'] = answer
     elif "Column" in question and "empty" in question and "fill it with" in question:
         if 'MANDATORY_FIELDS_HANDLING' not in config:
             config['MANDATORY_FIELDS_HANDLING'] = {}
@@ -336,9 +405,7 @@ def load_template_config():
         print("Warning: YAML not available. Configuration system disabled.")
         return {}
     
-    # Look for template in the same directory as the script
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    template_path = os.path.join(script_dir, 'BioSample_Metadata_Config_Template.yaml')
+    template_path = get_config_template_path()
     
     if not os.path.exists(template_path):
         print(f"Warning: Template file not found at: {template_path}")
@@ -389,6 +456,8 @@ def save_config(config, config_file_path):
                 'Do you want to enter the same value for all samples? [y/N]:': '',
                 'Enter the value to use for all samples:': '',
                 'Enter field number (1-X) or field name to group samples:': '',
+                'Do you want to use all values in FIELD, or only specific ones? [all/specific]:': '',
+                'Selected values for FIELD (numbers separated by commas):': {},
                 'Enter bioproject_accession for FIELD = VALUE:': {}
             },
             'MANDATORY_FIELDS_HANDLING': {
@@ -417,13 +486,17 @@ def save_config(config, config_file_path):
                 'Or enter none to exclude none (add all):': '',
                 'Columns to exclude:': ''
             },
+            'EXPERIMENT_RUN_METADATA_FILTER': {
+                'Do you want to keep all samples in the BioSample output, or only samp_name values that have blank/NA associatedSequences in the experimentRunMetadata sheet? [all/blank_only]:': ''
+            },
             'generated_files': config.get('generated_files', [])
         }
         
         # If config already has structured sections (from template), preserve them
         for section_name in ['CONFIGURATION_FILE_HANDLING', 'OUTPUT_FILE_OVERWRITE', 'BIOPROJECT_ACCESSION_HANDLING', 
                            'MANDATORY_FIELDS_HANDLING', 'NUMERICAL_COLUMNS_WITH_UNITS', 'DUPLICATE_ROW_CHECKING',
-                           'SAMPLE_TITLE_GENERATION', 'ADDITIONAL_COLUMNS_FROM_SAMPLE_METADATA']:
+                           'SAMPLE_TITLE_GENERATION', 'ADDITIONAL_COLUMNS_FROM_SAMPLE_METADATA',
+                           'EXPERIMENT_RUN_METADATA_FILTER']:
             if section_name in config and isinstance(config[section_name], dict):
                 # Merge existing section data with default structure
                 for key, value in config[section_name].items():
@@ -456,11 +529,27 @@ def save_config(config, config_file_path):
                 structured_config['BIOPROJECT_ACCESSION_HANDLING']['Enter the value to use for all samples:'] = answer
             elif "field number" in question and "group samples" in question:
                 structured_config['BIOPROJECT_ACCESSION_HANDLING']['Enter field number (1-X) or field name to group samples:'] = answer
+            elif "only specific ones" in question and "[all/specific]" in question:
+                structured_config['BIOPROJECT_ACCESSION_HANDLING'][
+                    'Do you want to use all values in FIELD, or only specific ones? [all/specific]:'] = answer
+            elif "Selected values for field '" in question and "numbers separated by commas" in question:
+                m = re.search(r"Selected values for field '([^']+)'", question)
+                if m:
+                    fld = m.group(1)
+                    if not isinstance(structured_config['BIOPROJECT_ACCESSION_HANDLING'].get(
+                            'Selected values for FIELD (numbers separated by commas):'), dict):
+                        structured_config['BIOPROJECT_ACCESSION_HANDLING'][
+                            'Selected values for FIELD (numbers separated by commas):'] = {}
+                    structured_config['BIOPROJECT_ACCESSION_HANDLING'][
+                        'Selected values for FIELD (numbers separated by commas):'][fld] = answer
             elif "Enter bioproject_accession for" in question:
                 # Store in the grouping values dictionary
                 if not isinstance(structured_config['BIOPROJECT_ACCESSION_HANDLING']['Enter bioproject_accession for FIELD = VALUE:'], dict):
                     structured_config['BIOPROJECT_ACCESSION_HANDLING']['Enter bioproject_accession for FIELD = VALUE:'] = {}
                 structured_config['BIOPROJECT_ACCESSION_HANDLING']['Enter bioproject_accession for FIELD = VALUE:'][question] = answer
+            elif "[all/blank_only]" in question and "experimentRunMetadata" in question and "associatedSequences" in question:
+                structured_config['EXPERIMENT_RUN_METADATA_FILTER'][
+                    'Do you want to keep all samples in the BioSample output, or only samp_name values that have blank/NA associatedSequences in the experimentRunMetadata sheet? [all/blank_only]:'] = answer
             elif "Column" in question and "empty" in question and "fill it with" in question:
                 # Store in the field values dictionary
                 if not isinstance(structured_config['MANDATORY_FIELDS_HANDLING']['Column FIELD_NAME is empty. Do you want to fill it with not collected, not applicable, or missing? (Or enter any other value, or leave blank to skip):'], dict):
@@ -535,7 +624,8 @@ def write_config_with_comments(config, config_file_path):
                 ('NUMERICAL_COLUMNS_WITH_UNITS', 'NUMERICAL COLUMNS WITH UNITS', 'Unit configuration for numerical columns in BioSample metadata'),
                 ('DUPLICATE_ROW_CHECKING', 'DUPLICATE ROW CHECKING', 'Configuration for handling duplicate rows in the output'),
                 ('SAMPLE_TITLE_GENERATION', 'SAMPLE TITLE GENERATION', 'Configuration for generating sample_title column values'),
-                ('ADDITIONAL_COLUMNS_FROM_SAMPLE_METADATA', 'ADDITIONAL COLUMNS FROM SAMPLE METADATA', 'Configuration for adding additional columns from FAIReMetadata to BioSampleMetadata')
+                ('ADDITIONAL_COLUMNS_FROM_SAMPLE_METADATA', 'ADDITIONAL COLUMNS FROM SAMPLE METADATA', 'Configuration for adding additional columns from FAIReMetadata to BioSampleMetadata'),
+                ('EXPERIMENT_RUN_METADATA_FILTER', 'EXPERIMENT RUN METADATA FILTER', 'Optional filter by blank/NA associatedSequences in experimentRunMetadata after bioproject assignment')
             ]
             
             for section_key, section_title, section_desc in sections:
@@ -597,6 +687,7 @@ def write_config_with_comments(config, config_file_path):
             f.write("# - DUPLICATE_ROW_CHECKING: Duplicate row resolution settings\n")
             f.write("# - SAMPLE_TITLE_GENERATION: Sample title column generation settings\n")
             f.write("# - ADDITIONAL_COLUMNS_FROM_SAMPLE_METADATA: Additional column selection\n")
+            f.write("# - EXPERIMENT_RUN_METADATA_FILTER: Filter BioSample rows by experimentRunMetadata associatedSequences\n")
             f.write("# - generated_files: List of files created by the script\n")
             f.write("# \n")
             f.write("# To reuse this configuration:\n")
@@ -643,12 +734,50 @@ def find_answer_in_structured_config(config, question):
     elif "field number" in question and "group samples" in question:
         answer = config.get('BIOPROJECT_ACCESSION_HANDLING', {}).get('Enter field number (1-X) or field name to group samples:', '')
         return answer if answer != '' else None
+    elif "only specific ones" in question and "[all/specific]" in question:
+        bih = config.get('BIOPROJECT_ACCESSION_HANDLING') or {}
+        answer = bih.get(
+            'Do you want to use all values in FIELD, or only specific ones? [all/specific]:', '')
+        if not answer:
+            # Alternate YAML spellings / hand-edited configs
+            for k, v in bih.items():
+                if not isinstance(v, str) or not str(v).strip():
+                    continue
+                if 'all values in FIELD' in k and 'only specific' in k:
+                    answer = v
+                    break
+        if not answer:
+            fm = re.search(r"values in '([^']+)'", question)
+            if fm:
+                fk = f"bioproject_use_all_values_{fm.group(1)}"
+                top = config.get(fk)
+                if top is not None and str(top).strip() != '':
+                    answer = str(top).strip()
+        return answer if answer != '' else None
+    elif "Selected values for field '" in question and "numbers separated by commas" in question:
+        m = re.search(r"Selected values for field '([^']+)'", question)
+        if m:
+            fld = m.group(1)
+            per_field = config.get('BIOPROJECT_ACCESSION_HANDLING', {}).get(
+                'Selected values for FIELD (numbers separated by commas):', {})
+            if isinstance(per_field, dict):
+                answer = per_field.get(fld, '')
+                return answer if answer != '' else None
+        return None
     elif "Enter bioproject_accession for" in question:
         # Look in the grouping values dictionary
         grouping_values = config.get('BIOPROJECT_ACCESSION_HANDLING', {}).get('Enter bioproject_accession for FIELD = VALUE:', {})
         if isinstance(grouping_values, dict):
             answer = grouping_values.get(question, '')
             return answer if answer != '' else None
+    elif "[all/blank_only]" in question and "experimentRunMetadata" in question and "associatedSequences" in question:
+        answer = config.get('EXPERIMENT_RUN_METADATA_FILTER', {}).get(
+            'Do you want to keep all samples in the BioSample output, or only samp_name values that have blank/NA associatedSequences in the experimentRunMetadata sheet? [all/blank_only]:', '')
+        if not answer:
+            v = config.get('filter_experiment_run_blank_associatedSequences')
+            if v is not None and str(v).strip() != '':
+                answer = str(v).strip()
+        return answer if answer != '' else None
     elif "Column" in question and "empty" in question and "fill it with" in question:
         # Look in the field values dictionary
         field_values = config.get('MANDATORY_FIELDS_HANDLING', {}).get('Column FIELD_NAME is empty. Do you want to fill it with not collected, not applicable, or missing? (Or enter any other value, or leave blank to skip):', {})
@@ -707,6 +836,51 @@ def find_answer_in_structured_config(config, question):
     return None
 
 
+def find_answer_in_qa_pairs(config, question):
+    """
+    Match saved qa_pairs from YAML (exact or fuzzy for dynamic prompts).
+    """
+    question = question.strip()
+    pairs = config.get("qa_pairs")
+    if not pairs:
+        return None
+    for qa in pairs:
+        if qa.get("question", "").strip() == question:
+            a = qa.get("answer", "")
+            if str(a).strip() != "":
+                return str(a).strip()
+    # Dynamic prompt: all vs specific values for a grouping field (count in text may differ)
+    if "only specific ones" in question and "[all/specific]" in question:
+        field_m = re.search(r"values in '([^']+)'", question)
+        field = field_m.group(1) if field_m else None
+        for qa in pairs:
+            q = qa.get("question", "")
+            if "only specific ones" not in q or "[all/specific]" not in q:
+                continue
+            if field and field in q:
+                a = qa.get("answer", "")
+                if str(a).strip() != "":
+                    return str(a).strip()
+        for qa in pairs:
+            q = qa.get("question", "")
+            if "only specific ones" in q and "[all/specific]" in q:
+                a = qa.get("answer", "")
+                if str(a).strip() != "":
+                    return str(a).strip()
+    if "[all/blank_only]" in question and "experimentRunMetadata" in question:
+        for qa in pairs:
+            q = qa.get("question", "")
+            if (
+                "[all/blank_only]" in q
+                and "experimentRunMetadata" in q
+                and "associatedSequences" in q
+            ):
+                a = qa.get("answer", "")
+                if str(a).strip() != "":
+                    return str(a).strip()
+    return None
+
+
 def get_config_value(config, key, prompt_func, question, use_config_file, *args, **kwargs):
     """
     Get value from config or prompt user if not found.
@@ -730,20 +904,78 @@ def get_config_value(config, key, prompt_func, question, use_config_file, *args,
     if use_config_file:
         # Try to find answer in structured config format
         saved_answer = find_answer_in_structured_config(config, question)
+        if saved_answer is None:
+            saved_answer = find_answer_in_qa_pairs(config, question)
+        if saved_answer is None and key:
+            v = config.get(key)
+            if v is not None and str(v).strip() != "":
+                saved_answer = str(v).strip()
         if saved_answer is not None:
             print(f"{question} {saved_answer}")
             add_qa(config, question, saved_answer, use_config_file)
+            if key:
+                config[key] = saved_answer
             return saved_answer
     
     # Always prompt user and save the answer
     value = prompt_func(*args, **kwargs)
     add_qa(config, question, value, use_config_file)
+    if key:
+        config[key] = value
     return value
 
 
 
 
 
+
+
+# FAIRe / MIMARKS fields that should never receive automatic unit handling
+NON_MEASUREMENT_FAIRE_COLUMNS = frozenset({
+    'samp_name',
+    'materialSampleID',
+    'library_ID',
+    'biosample_accession',
+    'geo_loc_name',
+    'organism',
+    'eventDate',
+    'sample_type',
+    'short_name',
+    'filter_name',
+    'sample_derived_from',
+    'sample_composed_of',
+})
+
+NON_MEASUREMENT_MIMARKS_COLUMNS = frozenset({
+    '*sample_name',
+    'sample_title',
+    '*organism',
+    '*geo_loc_name',
+    '*lat_lon',
+    '*collection_date',
+    'bioproject_accession',
+    'source_material_id',
+})
+
+
+def _cleaned_string_is_numeric(clean_value):
+    """Return True if a letter-stripped string represents a plain numeric value."""
+    if not clean_value:
+        return False
+
+    # Python float() accepts underscores as digit separators (e.g. 9_20190715)
+    if '_' in clean_value:
+        return False
+
+    # Reject strings that still contain letters (e.g. hyphenated IDs)
+    if re.search(r'[a-zA-Z]', clean_value):
+        return False
+
+    try:
+        float(clean_value)
+        return True
+    except (ValueError, TypeError):
+        return False
 
 
 def is_numerical_column(df, column):
@@ -783,8 +1015,7 @@ def is_numerical_column(df, column):
                 clean_value = re.sub(r'[a-zA-Z\s]*$', '', clean_value)
                 clean_value = clean_value.strip()
                 
-                if clean_value:
-                    float(clean_value)  # Will raise ValueError if not numeric
+                if _cleaned_string_is_numeric(clean_value):
                     return True
         except (ValueError, TypeError):
             continue
@@ -849,6 +1080,12 @@ def handle_numerical_columns_with_units(sample_df, output_df, mapping, config, u
     numerical_columns_to_process = []
     
     for mimarks_col, (sample_col, _) in mapping.items():
+        if mimarks_col in NON_MEASUREMENT_MIMARKS_COLUMNS:
+            continue
+        if isinstance(sample_col, tuple):
+            continue
+        if sample_col in NON_MEASUREMENT_FAIRE_COLUMNS:
+            continue
         if sample_col and sample_col in sample_df.columns:
             if is_numerical_column(sample_df, sample_col):
                 numerical_columns_to_process.append((mimarks_col, sample_col))
@@ -1398,6 +1635,223 @@ def add_additional_columns(output_df, sample_df, mapping, config, use_config_fil
     return output_df
 
 
+# experimentRunMetadata optional filter (after bioproject grouping); must match YAML keys
+EXP_RUN_ASSOC_FILTER_QUESTION = (
+    "Do you want to keep all samples in the BioSample output, or only samp_name values "
+    "that have blank/NA associatedSequences in the experimentRunMetadata sheet? [all/blank_only]: "
+)
+
+
+def _read_faire_sheet_df(faire_path, sheet_name, header=0, keep_default_na=True):
+    """
+    Read a FAIRe sheet from either:
+      - full FAIRe workbook (.xlsx/.xls), selecting `sheet_name`
+      - single exported sheet file (.tsv), where `sheet_name` is informational.
+    Returns None on failure.
+    """
+    ext = os.path.splitext(str(faire_path))[1].lower()
+    if ext == ".tsv":
+        try:
+            return pd.read_csv(
+                faire_path,
+                sep="\t",
+                header=header,
+                keep_default_na=keep_default_na,
+            )
+        except Exception:
+            try:
+                return pd.read_csv(
+                    faire_path,
+                    sep=None,
+                    engine="python",
+                    header=header,
+                    keep_default_na=keep_default_na,
+                )
+            except Exception:
+                return None
+
+    _kw = dict(sheet_name=sheet_name, header=header, keep_default_na=keep_default_na)
+    try:
+        return pd.read_excel(faire_path, engine="openpyxl", **_kw)
+    except Exception:
+        try:
+            return pd.read_excel(faire_path, engine="xlrd", **_kw)
+        except Exception:
+            try:
+                return pd.read_excel(faire_path, **_kw)
+            except Exception:
+                return None
+
+
+def _get_faire_sheet_source(args, sheet_name):
+    """
+    Return the path to use for a requested sheet:
+      - specific sheet argument path when provided
+      - otherwise --FAIReMetadata workbook path
+    """
+    key_map = {
+        "sampleMetadata": "sampleMetadata",
+        "projectMetadata": "projectMetadata",
+        "experimentRunMetadata": "experimentRunMetadata",
+    }
+    specific_key = key_map.get(sheet_name)
+    if specific_key:
+        specific = getattr(args, specific_key, None)
+        if specific:
+            return specific
+    return args.FAIReMetadata
+
+
+def _read_experiment_run_metadata_df(faire_path):
+    """
+    Read experimentRunMetadata sheet (column headers on row 3). Returns None on failure.
+
+    keep_default_na=False: pandas otherwise maps Excel text 'NA' / 'N/A' to float NaN,
+    which would be misclassified as blank associatedSequences.
+    """
+    return _read_faire_sheet_df(
+        faire_path,
+        "experimentRunMetadata",
+        header=2,
+        keep_default_na=False,
+    )
+
+
+def _associated_sequences_is_blank(val):
+    """
+    True only for missing or empty associatedSequences cells.
+    Literal 'NA' / 'N/A' (including after Excel import) are not blank.
+    """
+    if isinstance(val, str):
+        st = val.strip()
+        if st.upper() in ("NA", "N/A"):
+            return False
+    if pd.isna(val):
+        return True
+    s = str(val).strip()
+    if not s or s.lower() in ("nan", "none"):
+        return True
+    if s.upper() in ("NA", "N/A"):
+        return False
+    return False
+
+
+def apply_experiment_run_metadata_associated_sequences_filter(
+    faire_path, sample_df, output_df, config, use_config_file, *, get_config_value_fn=None
+):
+    """
+    Optionally restrict sample_df / output_df to samp_names for which every
+    experimentRunMetadata row with that samp_name has blank (empty) associatedSequences.
+    Literal 'NA' is not blank. Duplicate samp_name rows: all must be blank for the name to qualify.
+
+    get_config_value_fn: optional callable (same signature as this module's get_config_value).
+    Pass SRA's get_config_value when calling from FAIRe2SRA so prompts and YAML map to the SRA config.
+    """
+    gc = get_config_value_fn if get_config_value_fn is not None else get_config_value
+    config.pop("_faire_erm_blank_only_rows_applied", None)
+    print("\n" + "=" * 50)
+    print("FILTER BY EXPERIMENT RUN METADATA (associatedSequences)")
+    print("=" * 50)
+
+    erm = _read_experiment_run_metadata_df(faire_path)
+    if erm is None:
+        print("Skipping: could not read experimentRunMetadata sheet from FAIRe workbook.")
+        return sample_df, output_df
+    if "samp_name" not in erm.columns or "associatedSequences" not in erm.columns:
+        print(
+            "Skipping: experimentRunMetadata must contain 'samp_name' and 'associatedSequences'."
+        )
+        return sample_df, output_df
+
+    erm = erm.copy()
+    erm["_sn"] = erm["samp_name"].map(
+        lambda x: str(x).strip() if pd.notna(x) else ""
+    )
+    erm["_blank"] = erm["associatedSequences"].map(_associated_sequences_is_blank)
+    # blank_only: a samp_name qualifies only if EVERY row with that name has blank
+    # associatedSequences. Literal "NA" is not blank. Example: 3 duplicate rows with
+    # (NA, NA, blank) -> not all blank -> this samp_name is excluded (samples removed).
+    all_blank_per_name = erm.groupby("_sn", sort=False)["_blank"].all()
+    keep_set = {
+        n
+        for n, every_blank in all_blank_per_name.items()
+        if every_blank and n != "" and str(n).lower() != "nan"
+    }
+
+    if not keep_set:
+        print(
+            "No samp_name has only blank (empty) associatedSequences on every experimentRunMetadata "
+            "row for that name; keeping all samples."
+        )
+        return sample_df, output_df
+
+    print(
+        "Note: 'blank' means empty/missing cells only; literal NA is not blank. "
+        "Duplicate samp_name: every row must be blank — e.g. 3 rows with (NA, NA, blank) "
+        "does not qualify; blank_only excludes that samp_name entirely."
+    )
+
+    choice = gc(
+        config,
+        "filter_experiment_run_blank_associatedSequences",
+        get_valid_user_choice,
+        EXP_RUN_ASSOC_FILTER_QUESTION,
+        use_config_file,
+        EXP_RUN_ASSOC_FILTER_QUESTION,
+        ["all", "blank_only"],
+        default="all",
+    )
+    if choice != "blank_only":
+        print("Keeping all samples (no filter by experimentRunMetadata associatedSequences).")
+        return sample_df, output_df
+
+    if "samp_name" not in sample_df.columns:
+        print("Skipping blank_only filter: sample_df has no 'samp_name' column.")
+        return sample_df, output_df
+
+    before_s = len(sample_df)
+    before_o = len(output_df) if output_df is not None else 0
+    sample_df = sample_df[
+        sample_df["samp_name"].astype(str).str.strip().isin(keep_set)
+    ].copy()
+    sample_df = sample_df.reset_index(drop=True)
+    valid = set(sample_df["samp_name"].astype(str).str.strip())
+
+    if output_df is not None and len(output_df) > 0:
+        if "*sample_name" in output_df.columns or "sample_name" in output_df.columns:
+            sample_name_col = "*sample_name" if "*sample_name" in output_df.columns else "sample_name"
+            output_df = output_df[
+                output_df[sample_name_col].astype(str).str.strip().isin(valid)
+            ].copy()
+            output_df = output_df.reset_index(drop=True)
+        elif "samp_name" in output_df.columns:
+            output_df = output_df[
+                output_df["samp_name"].astype(str).str.strip().isin(valid)
+            ].copy()
+            output_df = output_df.reset_index(drop=True)
+        elif "library_ID" in output_df.columns and "lib_id" in sample_df.columns:
+            valid_lib = set(sample_df["lib_id"].astype(str).str.strip())
+            output_df = output_df[
+                output_df["library_ID"].astype(str).str.strip().isin(valid_lib)
+            ].copy()
+            output_df = output_df.reset_index(drop=True)
+        else:
+            print(
+                "Warning: output_df could not be aligned to filtered sample_df "
+                "(expected *sample_name/sample_name, samp_name, or library_ID + lib_id)."
+            )
+    # len(output_df)==0: e.g. SRA before rows are built — only sample_df is filtered
+
+    after_o = len(output_df) if output_df is not None else 0
+    print(
+        f"Kept only samp_name where all experimentRunMetadata rows for that name have blank "
+        f"associatedSequences (literal NA excluded): "
+        f"{before_s} -> {len(sample_df)} samples, {before_o} -> {after_o} output rows."
+    )
+    config["_faire_erm_blank_only_rows_applied"] = True
+    return sample_df, output_df
+
+
 def biosample_mode(args):
     """
     BioSample mode: Convert FAIRe metadata to BioSample MIMARKS format.
@@ -1411,6 +1865,18 @@ def biosample_mode(args):
     print("\n" + "="*60)
     print("FAIRE2NCBI - BIOSAMPLE MODE")
     print("="*60)
+
+    try:
+        original_template = getattr(args, 'BioSample_Template', None)
+        args.BioSample_Template = resolve_input_path(
+            original_template,
+            default=DEFAULT_BIOSAMPLE_TEMPLATE,
+        )
+        if original_template is None:
+            print(f"Using bundled BioSample template: {args.BioSample_Template}")
+    except FileNotFoundError as exc:
+        print(f"Error: {exc}")
+        return
     
     # Initialize config and determine config file handling strategy
     config = {}
@@ -1421,18 +1887,7 @@ def biosample_mode(args):
     # Handle config file logic based on user input
     if args.config_file:
         # Check if the provided config file is the template
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        template_path = os.path.join(script_dir, 'BioSample_Metadata_Config_Template.yaml')
-        
-        # Check if the provided config file is the template (handle both absolute and relative paths)
-        abs_config_file = os.path.abspath(args.config_file)
-        abs_template_path = os.path.abspath(template_path)
-        
-        # Also check if the filename matches the template filename
-        config_filename = os.path.basename(args.config_file)
-        template_filename = os.path.basename(template_path)
-        
-        is_template_file = (abs_config_file == abs_template_path) or (config_filename == template_filename)
+        is_template_file = is_config_template_file(args.config_file)
         
         if is_template_file:
             # User provided the template file, treat it as template usage
@@ -1442,7 +1897,7 @@ def biosample_mode(args):
             if template_config:
                 config = template_config.copy()
                 # Generate new config file path based on BioSample metadata name
-                config_file_path = get_config_file_path(args.BioSampleMetadata)
+                config_file_path = get_config_file_path(args.BioSample_Metadata)
                 
                 # Check if the target config file already exists
                 if os.path.exists(config_file_path) and not args.force:
@@ -1477,15 +1932,15 @@ def biosample_mode(args):
                 print("Could not load template. Proceeding with interactive questions.")
                 config = {}
                 # Generate config file path based on BioSample metadata name
-                config_file_path = get_config_file_path(args.BioSampleMetadata)
+                config_file_path = get_config_file_path(args.BioSample_Metadata)
         else:
             # User provided a custom config file (not template)
             if os.path.exists(args.config_file):
                 provided_config = load_config(args.config_file)
                 if provided_config:
                     config = provided_config
-                    # For custom config files, update the same file (but create new path based on BioSampleMetadata for consistency)
-                    config_file_path = get_config_file_path(args.BioSampleMetadata)
+                    # For custom config files, update the same file (but create new path based on BioSample_Metadata for consistency)
+                    config_file_path = get_config_file_path(args.BioSample_Metadata)
                     use_config_file = True
                     is_template_config = False
                     print(f"Using provided custom config file: {args.config_file}")
@@ -1497,29 +1952,38 @@ def biosample_mode(args):
                     print(f"Warning: Could not load config file {args.config_file}")
                     config = {}
                     # Generate config file path based on BioSample metadata name
-                    config_file_path = get_config_file_path(args.BioSampleMetadata)
+                    config_file_path = get_config_file_path(args.BioSample_Metadata)
             else:
                 print(f"Warning: Config file {args.config_file} not found")
                 config = {}
                 # Generate config file path based on BioSample metadata name
-                config_file_path = get_config_file_path(args.BioSampleMetadata)
+                config_file_path = get_config_file_path(args.BioSample_Metadata)
     else:
-        # No config file provided, ask user if they want to use template
-        use_template = get_valid_user_choice(
-            "No config file provided. Do you want to use the template configuration? [y/N]: ",
-            ['y', 'yes', 'n', 'no'],
-            default="n"
-        )
-        
-        if use_template in ('y', 'yes'):
+        config_source = prompt_config_source_choice()
+
+        if config_source == 'previous':
+            args.config_file = prompt_previous_config_path()
+            provided_config = load_config(args.config_file)
+            if provided_config:
+                config = provided_config
+                config_file_path = get_config_file_path(args.BioSample_Metadata)
+                use_config_file = True
+                is_template_config = False
+                print(f"Using config file from previous run: {args.config_file}")
+                print(f"Configuration will be updated in: {config_file_path}")
+                config['date_time'] = datetime.now().isoformat()
+                print(f"Updated timestamp: {config['date_time']}")
+            else:
+                print(f"Warning: Could not load config file {args.config_file}")
+                config = {}
+                config_file_path = get_config_file_path(args.BioSample_Metadata)
+        elif config_source == 'template':
             # Load template configuration
             template_config = load_template_config()
             if template_config:
                 config = template_config.copy()
-                # Generate new config file path based on BioSample metadata name
-                config_file_path = get_config_file_path(args.BioSampleMetadata)
-                
-                # Check if the target config file already exists
+                config_file_path = get_config_file_path(args.BioSample_Metadata)
+
                 if os.path.exists(config_file_path) and not args.force:
                     overwrite_choice = get_valid_user_choice(
                         f"Custom config file already exists: {config_file_path}\nDo you want to overwrite it? [y/N]: ",
@@ -1529,15 +1993,13 @@ def biosample_mode(args):
                     if overwrite_choice not in ("y", "yes"):
                         print("Aborted by user. No config file will be created.")
                         return
-                    else:
-                        print(f"Will overwrite existing config file: {config_file_path}")
+                    print(f"Will overwrite existing config file: {config_file_path}")
                 elif os.path.exists(config_file_path) and args.force:
                     print(f"Config file exists. Using --force flag: automatically overwriting {config_file_path}")
-                
+
                 use_config_file = True
                 is_template_config = True
                 print(f"Using template configuration. Will create new config file: {config_file_path}")
-                # Update command and timestamp
                 config['command'] = ' '.join(sys.argv)
                 config['date_time'] = datetime.now().isoformat()
                 config['qa_pairs'] = []
@@ -1545,14 +2007,11 @@ def biosample_mode(args):
             else:
                 print("Could not load template. Proceeding with interactive questions.")
                 config = {}
-                # Generate config file path based on BioSample metadata name
-                config_file_path = get_config_file_path(args.BioSampleMetadata)
+                config_file_path = get_config_file_path(args.BioSample_Metadata)
         else:
-            # User chose not to use template, proceed with interactive questions
             print("Proceeding with interactive questions. Will create custom config file.")
             config = {}
-            # Generate config file path based on BioSample metadata name
-            config_file_path = get_config_file_path(args.BioSampleMetadata)
+            config_file_path = get_config_file_path(args.BioSample_Metadata)
     
     # Initialize with basic run info if not present
     if 'command' not in config:
@@ -1563,45 +2022,40 @@ def biosample_mode(args):
     
     # Check if output file exists and handle --force
     # If --config_file is provided, automatically overwrite without prompting
-    if os.path.exists(args.BioSampleMetadata) and not args.force and not args.config_file:
+    if os.path.exists(args.BioSample_Metadata) and not args.force and not args.config_file:
         response = get_config_value(
             config,
             'overwrite_output_file',
             get_valid_user_choice,
-            f"File '{args.BioSampleMetadata}' already exists. Overwrite? [y/N]: ",
+            f"File '{args.BioSample_Metadata}' already exists. Overwrite? [y/N]: ",
             use_config_file,
-            f"File '{args.BioSampleMetadata}' already exists. Overwrite? [y/N]: ",
+            f"File '{args.BioSample_Metadata}' already exists. Overwrite? [y/N]: ",
             ["y", "yes", "n", "no"],
             default="n"
         )
         if response not in ('y', 'yes'):
             print('Aborted by user. No file overwritten.')
             return
-    elif os.path.exists(args.BioSampleMetadata) and args.config_file and not args.force:
-        print(f"Output file '{args.BioSampleMetadata}' exists. Using --config_file mode: automatically overwriting.")
+    elif os.path.exists(args.BioSample_Metadata) and args.config_file and not args.force:
+        print(f"Output file '{args.BioSample_Metadata}' exists. Using --config_file mode: automatically overwriting.")
 
-    # Read Excel FAIReMetadata: header is 3rd row (index 2)
-    print(f"Reading FAIReMetadata from: {args.FAIReMetadata}")
-    try:
-        sample_df = pd.read_excel(args.FAIReMetadata, sheet_name='sampleMetadata', header=2, engine='openpyxl')
-    except Exception as e:
-        print(f"Warning: Could not read with openpyxl engine: {e}")
-        try:
-            sample_df = pd.read_excel(args.FAIReMetadata, sheet_name='sampleMetadata', header=2, engine='xlrd')
-        except Exception as e2:
-            print(f"Warning: Could not read with xlrd engine: {e2}")
-            try:
-                sample_df = pd.read_excel(args.FAIReMetadata, sheet_name='sampleMetadata', header=2)
-            except Exception as e3:
-                print(f"Error: Could not read Excel file: {e3}")
-                return
+    # Read sampleMetadata from full workbook (.xlsx) or a single sheet file (.tsv)
+    sample_meta_src = _get_faire_sheet_source(args, "sampleMetadata")
+    print(f"Reading sampleMetadata from: {sample_meta_src}")
+    sample_df = _read_faire_sheet_df(sample_meta_src, "sampleMetadata", header=2)
+    if sample_df is None:
+        print(
+            "Error: Could not read sampleMetadata. "
+            "Provide --FAIReMetadata workbook or --sampleMetadata file."
+        )
+        return
 
     sample_cols = list(sample_df.columns)
 
     # Read MIMARKS template header from the 12th line (index 11)
-    print(f"Reading BioSample template from: {args.BioSampleTemplate}")
+    print(f"Reading BioSample template from: {args.BioSample_Template}")
     try:
-        with open(args.BioSampleTemplate, 'r', encoding='utf-8') as f:
+        with open(args.BioSample_Template, 'r', encoding='utf-8') as f:
             lines = f.readlines()
         
         if len(lines) < 12:
@@ -1610,7 +2064,7 @@ def biosample_mode(args):
             
         mimarks_columns = lines[11].strip().split('\t')
     except FileNotFoundError:
-        print(f"Error: Template file '{args.BioSampleTemplate}' not found.")
+        print(f"Error: Template file '{args.BioSample_Template}' not found.")
         return
     except Exception as e:
         print(f"Error reading template file: {e}")
@@ -1930,17 +2384,133 @@ def biosample_mode(args):
                         for i, value in enumerate(unique_values, 1):
                             print(f"  {i:2d}. {value}")
                         
-                        # Get bioproject accession for each unique value
+                        # Ask user if they want to use all values or only some
+                        use_all_choice = get_config_value(
+                            config,
+                            f'bioproject_use_all_values_{selected_field}',
+                            get_valid_user_choice,
+                            f"\nDo you want to use all {len(unique_values)} values in '{selected_field}', or only specific ones? [all/specific]: ",
+                            use_config_file,
+                            f"\nDo you want to use all {len(unique_values)} values in '{selected_field}', or only specific ones? [all/specific]: ",
+                            ["all", "specific"],
+                            default="all"
+                        )
+                        
+                        # Filter unique_values based on user choice
+                        selected_values = unique_values
+                        if use_all_choice == "specific":
+                            # Check if we have saved selected values in config
+                            config_selected_key = f'bioproject_selected_values_{selected_field}'
+                            saved_selected_values = None
+                            
+                            if use_config_file and config_selected_key in config:
+                                # Try to restore from config
+                                saved_vals = config[config_selected_key]
+                                if isinstance(saved_vals, list):
+                                    # Filter to only include values that still exist
+                                    saved_selected_values = [v for v in saved_vals if v in unique_values]
+                                    if saved_selected_values:
+                                        print(f"Using saved selected values: {', '.join(saved_selected_values)}")
+                                        selected_values = saved_selected_values
+                            
+                            if not saved_selected_values:
+                                sel_q = (
+                                    f"Selected values for field '{selected_field}' "
+                                    f"(numbers separated by commas): "
+                                )
+
+                                def prompt_selected_value_indices():
+                                    while True:
+                                        try:
+                                            user_input = input(sel_q).strip()
+                                            if not user_input:
+                                                print("No values selected. Using all values.")
+                                                return ""
+                                            selected_indices = []
+                                            for item in user_input.split(","):
+                                                item = item.strip()
+                                                if item.isdigit():
+                                                    idx = int(item) - 1
+                                                    if 0 <= idx < len(unique_values):
+                                                        selected_indices.append(idx)
+                                                    else:
+                                                        print(f"Warning: Invalid value number {item}")
+                                                else:
+                                                    print(f"Warning: '{item}' is not a valid number")
+                                            if selected_indices:
+                                                selected_vals = [unique_values[i] for i in selected_indices]
+                                                print(f"Selected values: {', '.join(selected_vals)}")
+                                                return user_input
+                                            print("No valid values selected. Please try again.")
+                                        except ValueError:
+                                            print("Invalid input. Please enter valid numbers separated by commas.")
+
+                                raw_sel = get_config_value(
+                                    config,
+                                    f"bioproject_selected_indices_{selected_field}",
+                                    prompt_selected_value_indices,
+                                    sel_q,
+                                    use_config_file,
+                                )
+                                if raw_sel == "" or raw_sel is None:
+                                    selected_values = list(unique_values)
+                                else:
+                                    sel_str = raw_sel if isinstance(raw_sel, str) else str(raw_sel)
+                                    idx_list = []
+                                    for item in sel_str.split(","):
+                                        item = item.strip()
+                                        if item.isdigit():
+                                            idx = int(item) - 1
+                                            if 0 <= idx < len(unique_values):
+                                                idx_list.append(idx)
+                                    selected_values = (
+                                        [unique_values[i] for i in idx_list] if idx_list else list(unique_values)
+                                    )
+
+                                # Save selected values to config (runtime key for this run; structured YAML via get_config_value / add_qa)
+                                if use_config_file:
+                                    config[config_selected_key] = selected_values
+                        else:
+                            print(f"Using all {len(unique_values)} values.")
+                        
+                        # If specific values were selected, filter samples to only include those matching selected values
+                        if use_all_choice == "specific" and selected_values != unique_values:
+                            print(f"\nFiltering samples to only include those with '{selected_field}' in: {', '.join(selected_values)}")
+                            
+                            # Filter sample_df to only include rows where selected_field matches one of selected_values
+                            original_sample_count = len(sample_df)
+                            sample_df = sample_df[sample_df[selected_field].astype(str).str.strip().isin(selected_values)].copy()
+                            sample_df = sample_df.reset_index(drop=True)  # Reset index after filtering
+                            filtered_sample_count = len(sample_df)
+                            print(f"Filtered from {original_sample_count} to {filtered_sample_count} samples.")
+                            
+                            # Filter output_df to only include rows corresponding to filtered samples
+                            sample_name_col = '*sample_name' if '*sample_name' in output_df.columns else 'sample_name'
+                            if sample_name_col in output_df.columns and 'samp_name' in sample_df.columns:
+                                # Get list of sample names that should be kept
+                                valid_sample_names = set(sample_df['samp_name'].astype(str).str.strip())
+                                
+                                # Filter output_df
+                                original_output_count = len(output_df)
+                                output_df = output_df[output_df[sample_name_col].astype(str).str.strip().isin(valid_sample_names)].copy()
+                                output_df = output_df.reset_index(drop=True)  # Reset index after filtering
+                                filtered_output_count = len(output_df)
+                                print(f"Filtered output from {original_output_count} to {filtered_output_count} rows.")
+                            else:
+                                print("Warning: Could not filter output_df - sample name columns not found.")
+                        
+                        # Get bioproject accession for each selected value
                         value_to_bioproject = {}
                         config_key = f'bioproject_values_{selected_field}'
                         
                         if config_key in config:
-                            # Use saved values
-                            value_to_bioproject = config[config_key]
+                            # Use saved values, but only for selected values
+                            saved_values = config[config_key]
+                            value_to_bioproject = {val: saved_values.get(val, '') for val in selected_values}
                             print(f"Using saved bioproject values for field '{selected_field}'")
                         else:
                             # Get values from user
-                            for value in unique_values:
+                            for value in selected_values:
                                 def get_bioproject_input():
                                     while True:
                                         bioproject_val = input(f"Enter bioproject_accession for '{selected_field}' = '{value}': ").strip()
@@ -1980,6 +2550,16 @@ def biosample_mode(args):
                             
                             output_df[bioproject_col] = bioproject_values
                             print(f"Successfully assigned bioproject_accession values based on '{selected_field}' grouping.")
+                            sample_df, output_df = (
+                                apply_experiment_run_metadata_associated_sequences_filter(
+                                    _get_faire_sheet_source(args, "experimentRunMetadata"),
+                                    sample_df,
+                                    output_df,
+                                    config,
+                                    use_config_file,
+                                )
+                            )
+                            config.pop("_faire_erm_blank_only_rows_applied", None)
                         else:
                             print("Could not find sample name columns for mapping. bioproject_accession will remain blank.")
                     else:
@@ -2118,7 +2698,15 @@ def biosample_mode(args):
             )
             
             if rename_choice in ("y", "yes"):
-                new_col_name = input(f"Enter new column name (or press Enter to keep '{selected_col}'): ").strip()
+                new_name_q = f"Enter new column name (or press Enter to keep '{selected_col}'): "
+                new_col_name = get_config_value(
+                    config,
+                    f'duplicate_new_col_name_{selected_col}',
+                    input,
+                    new_name_q,
+                    use_config_file,
+                    new_name_q,
+                ).strip()
                 if not new_col_name:
                     new_col_name = selected_col
             else:
@@ -2164,40 +2752,56 @@ def biosample_mode(args):
             for i, col in enumerate(sample_df.columns, 1):
                 print(f"  {i:2d}. {col}")
                 
-            # Get column selection
-            while True:
-                try:
-                    col_choice = input(f"\nEnter column number (1-{len(sample_df.columns)}) or column name: ").strip()
-                    
-                    # Try to parse as number first
-                    if col_choice.isdigit():
-                        col_idx = int(col_choice) - 1
-                        if 0 <= col_idx < len(sample_df.columns):
-                            selected_col = sample_df.columns[col_idx]
-                            break
-                        else:
-                            print(f"Invalid column number. Please enter a number between 1 and {len(sample_df.columns)}")
-                    else:
-                        # Try to find column by name
-                        if col_choice in sample_df.columns:
-                            selected_col = col_choice
-                            break
-                        else:
-                            print(f"Column '{col_choice}' not found. Please enter a valid column name or number.")
-                except ValueError:
-                    print("Invalid input. Please enter a valid column number or name.")
-                
+            def get_fallback_column_choice():
+                while True:
+                    try:
+                        col_choice = input(
+                            f"\nEnter column number (1-{len(sample_df.columns)}) or column name: "
+                        ).strip()
+                        if col_choice.isdigit():
+                            col_idx = int(col_choice) - 1
+                            if 0 <= col_idx < len(sample_df.columns):
+                                return sample_df.columns[col_idx]
+                            print(
+                                f"Invalid column number. Please enter a number between 1 and {len(sample_df.columns)}"
+                            )
+                        elif col_choice in sample_df.columns:
+                            return col_choice
+                        print(f"Column '{col_choice}' not found. Please enter a valid column name or number.")
+                    except ValueError:
+                        print("Invalid input. Please enter a valid column number or name.")
+
+            selected_col = get_config_value(
+                config,
+                'duplicate_fallback_column',
+                get_fallback_column_choice,
+                f"\nEnter column number (1-{len(sample_df.columns)}) or column name: ",
+                use_config_file,
+            )
+
             print(f"Selected column: {selected_col}")
-            
-            # Ask user if they want to rename the column
-            rename_choice = get_valid_user_choice(
+
+            rename_choice = get_config_value(
+                config,
+                f'rename_duplicate_field_fallback_{selected_col}',
+                get_valid_user_choice,
+                f"Do you want to rename the column from '{selected_col}'? [y/N]: ",
+                use_config_file,
                 f"Do you want to rename the column from '{selected_col}'? [y/N]: ",
                 ["y", "yes", "n", "no", ""],
-                default="n"
+                default="n",
             )
-            
+
             if rename_choice in ("y", "yes"):
-                new_col_name = input(f"Enter new column name (or press Enter to keep '{selected_col}'): ").strip()
+                new_name_q_fb = f"Enter new column name (or press Enter to keep '{selected_col}'): "
+                new_col_name = get_config_value(
+                    config,
+                    f'duplicate_new_col_name_fallback_{selected_col}',
+                    input,
+                    new_name_q_fb,
+                    use_config_file,
+                    new_name_q_fb,
+                ).strip()
                 if not new_col_name:
                     new_col_name = selected_col
             else:
@@ -2285,16 +2889,16 @@ def biosample_mode(args):
     print("WRITING OUTPUT FILE")
     print("="*50)
     
-    print(f"Output file path: {os.path.abspath(args.BioSampleMetadata)}")
+    print(f"Output file path: {os.path.abspath(args.BioSample_Metadata)}")
     try:
-        with open(args.BioSampleMetadata, 'w', encoding='utf-8') as out_f:
+        with open(args.BioSample_Metadata, 'w', encoding='utf-8') as out_f:
             for i in range(11):  # Write comment lines (lines 0-10)
                 out_f.write(lines[i])
             # Write header and data
             output_df.to_csv(out_f, sep='\t', index=False)
-        print(f"Successfully wrote BioSample metadata to: {args.BioSampleMetadata}")
+        print(f"Successfully wrote BioSample metadata to: {args.BioSample_Metadata}")
         # Track the generated BioSample metadata file
-        add_generated_file(config, args.BioSampleMetadata, "BioSample metadata file")
+        add_generated_file(config, args.BioSample_Metadata, "BioSample metadata file")
     except Exception as e:
         print(f"Error writing output file: {e}")
         return
@@ -2315,7 +2919,7 @@ def biosample_mode(args):
             # When using template, ALWAYS create new config file (NEVER overwrite template)
             save_config(config, config_file_path)
             print(f"Created new configuration file from template: {config_file_path}")
-            print(f"Template file remains unchanged: {args.config_file}")
+            print(f"Template file remains unchanged: {get_config_template_path()}")
             print(f"Final timestamp: {config['date_time']}")
             # Track the generated configuration file
             add_generated_file(config, config_file_path, "Configuration file created from template with Q&A pairs")
@@ -2350,21 +2954,16 @@ def sra_mode(args):
             print('Aborted by user. No file overwritten.')
             return
 
-    # Read Excel FAIReMetadata: header is 3rd row (index 2)
-    print(f"Reading FAIReMetadata from: {args.FAIReMetadata}")
-    try:
-        sample_df = pd.read_excel(args.FAIReMetadata, sheet_name='experimentRunMetadata', header=2, engine='openpyxl')
-    except Exception as e:
-        print(f"Warning: Could not read with openpyxl engine: {e}")
-        try:
-            sample_df = pd.read_excel(args.FAIReMetadata, sheet_name='experimentRunMetadata', header=2, engine='xlrd')
-        except Exception as e2:
-            print(f"Warning: Could not read with xlrd engine: {e2}")
-            try:
-                sample_df = pd.read_excel(args.FAIReMetadata, sheet_name='experimentRunMetadata', header=2)
-            except Exception as e3:
-                print(f"Error: Could not read Excel file: {e3}")
-                return
+    # Read experimentRunMetadata from full workbook (.xlsx) or a single sheet file (.tsv)
+    erm_src = _get_faire_sheet_source(args, "experimentRunMetadata")
+    print(f"Reading experimentRunMetadata from: {erm_src}")
+    sample_df = _read_faire_sheet_df(erm_src, "experimentRunMetadata", header=2)
+    if sample_df is None:
+        print(
+            "Error: Could not read experimentRunMetadata. "
+            "Provide --FAIReMetadata workbook or --experimentRunMetadata file."
+        )
+        return
 
     # Check for assay_name column and handle multiple assays
     if 'assay_name' not in sample_df.columns:
@@ -2504,7 +3103,7 @@ def sra_mode(args):
     print("  - Handle sequencing run information")
     print("  - Generate SRA submission templates")
     print("  - Validate SRA metadata requirements")
-    print("\nPlease use the BioSamples mode for now.")
+    print("\nPlease use the BioSample mode for now.")
     
     # Write the SRA metadata file
     print(f"\nWriting SRA metadata to: {args.SRA_Metadata}")
@@ -2519,26 +3118,34 @@ def sra_mode(args):
 def main():
     """Main function to handle command line arguments and mode selection."""
     parser = argparse.ArgumentParser(
-        description="FAIRe2NCBI: Convert FAIRe FAIReMetadata to NCBI submission formats.",
+        description="FAIRe2NCBI: Convert FAIRe metadata to NCBI submission formats.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-BioSamples Mode Arguments:
-  --FAIReMetadata PATH       Path to FAIRe metadata Excel file (.xlsx) [required]
-  --BioSampleTemplate PATH   Path to MIMARKS template file (.tsv) [required]
-  --BioSampleMetadata PATH   Output TSV file for BioSample metadata [required]
+BioSample Mode Arguments:
+  --FAIReMetadata PATH       Path to FAIRe metadata Excel file (.xlsx)
+  --projectMetadata PATH
+  --sampleMetadata PATH
+  --experimentRunMetadata PATH
+                             Individual FAIRe sheet files (.tsv). Use either --FAIReMetadata OR all three sheet arguments.
+  --BioSample_Template PATH   Path to MIMARKS template file (.tsv) [optional; defaults to bundled template]
+  --BioSample_Metadata PATH   Output TSV file for BioSample metadata [required]
   --bioproject_accession ID  Bioproject accession to use for all samples [optional]
   --config_file PATH         Path to YAML configuration file for automated responses [optional]
   --force                    Overwrite output files without prompting [optional]
 
 SRA Mode Arguments:
-  --FAIReMetadata PATH       Path to FAIRe metadata Excel file (.xlsx) [required]
-  --SRA_Template PATH        Path to SRA template file (.tsv) [required]
+  --FAIReMetadata PATH       Path to FAIRe metadata Excel file (.xlsx)
+  --projectMetadata PATH
+  --sampleMetadata PATH
+  --experimentRunMetadata PATH
+                             Individual FAIRe sheet files (.tsv). Use either --FAIReMetadata OR all three sheet arguments.
+  --SRA_Template PATH        Path to SRA template file (.tsv) [optional; defaults to bundled template]
   --SRA_Metadata PATH        Output TSV file for SRA metadata [required]
   --force                    Overwrite output files without prompting [optional]
 
 Examples:
   # BioSample mode with bioproject accession (optional)
-  python FAIRe2NCBI.py BioSamples --FAIReMetadata data.xlsx --BioSampleTemplate template.tsv --BioSampleMetadata output.tsv --bioproject_accession PRJNA123456
+  python FAIRe2NCBI.py BioSample --FAIReMetadata data.xlsx --BioSample_Metadata output.tsv --bioproject_accession PRJNA123456
   
   # SRA mode
   python FAIRe2NCBI.py SRA --FAIReMetadata data.xlsx --SRA_Template sra_template.tsv --SRA_Metadata sra_output.tsv
@@ -2547,24 +3154,30 @@ Examples:
     
     # Mode selection (mutually exclusive)
     mode_group = parser.add_mutually_exclusive_group(required=True)
-    mode_group.add_argument('BioSamples', nargs='?', const=True,
+    mode_group.add_argument('BioSample', nargs='?', const=True,
                            help='BioSample mode: Convert to BioSample MIMARKS format')
     mode_group.add_argument('SRA', nargs='?', const=True,
                            help='SRA mode: Convert to SRA submission format')
     
     # BioSample mode arguments
     parser.add_argument('--FAIReMetadata', type=str,
-                       help='Path to FAIRe metadata Excel file (.xlsx) [required for both modes]')
-    parser.add_argument('--BioSampleTemplate', type=str,
-                       help='Path to MIMARKS template file (.tsv) [required for BioSample mode]')
-    parser.add_argument('--BioSampleMetadata', type=str,
+                       help='Path to FAIRe metadata Excel file (.xlsx)')
+    parser.add_argument('--projectMetadata', type=str,
+                       help='Path to projectMetadata sheet (.tsv) (required if FAIReMetadata not provided)')
+    parser.add_argument('--sampleMetadata', type=str,
+                       help='Path to sampleMetadata sheet (.tsv) (required if FAIReMetadata not provided)')
+    parser.add_argument('--experimentRunMetadata', type=str,
+                       help='Path to experimentRunMetadata sheet (.tsv) (required if FAIReMetadata not provided)')
+    parser.add_argument('--BioSample_Template', type=str,
+                       help='Path to MIMARKS template file (.tsv) [optional; defaults to bundled template]')
+    parser.add_argument('--BioSample_Metadata', type=str,
                        help='Output TSV file for BioSample metadata [required for BioSample mode]')
     parser.add_argument('--bioproject_accession', type=str,
                        help='Bioproject accession to use for all samples [optional for BioSample mode]')
     
     # SRA mode arguments
     parser.add_argument('--SRA_Template', type=str,
-                       help='Path to SRA template file (.tsv) [required for SRA mode]')
+                       help='Path to SRA template file (.tsv) [optional; defaults to bundled template]')
     parser.add_argument('--SRA_Metadata', type=str,
                        help='Output TSV file for SRA metadata [required for SRA mode]')
     
@@ -2578,44 +3191,98 @@ Examples:
     
     # Determine which mode was selected
     selected_mode = None
-    if args.BioSamples is not None:
-        selected_mode = 'BioSamples'
+    if args.BioSample is not None:
+        selected_mode = 'BioSample'
     elif args.SRA is not None:
         selected_mode = 'SRA'
     
     # Validate mode-specific arguments based on selected mode
-    if selected_mode == 'BioSamples':
+    if selected_mode == 'BioSample':
         # BioSample mode validation
-        required_args = ['FAIReMetadata', 'BioSampleTemplate', 'BioSampleMetadata']
+        required_args = ['BioSample_Metadata']
         missing_args = [arg for arg in required_args if not getattr(args, arg)]
         if missing_args:
-            parser.error(f"BioSamples mode requires: --{', --'.join(missing_args)}")
+            parser.error(f"BioSample mode requires: --{', --'.join(missing_args)}")
+
+        has_workbook = bool(args.FAIReMetadata)
+        sheet_args = [
+            args.projectMetadata,
+            args.sampleMetadata,
+            args.experimentRunMetadata,
+        ]
+        has_any_sheet = any(bool(x) for x in sheet_args)
+        has_all_sheets = all(bool(x) for x in sheet_args)
+        if has_workbook and has_any_sheet:
+            parser.error(
+                "Use either --FAIReMetadata OR all three sheet arguments "
+                "(--projectMetadata, --sampleMetadata, --experimentRunMetadata), not both."
+            )
+        if not has_workbook and not has_any_sheet:
+            parser.error(
+                "Provide either --FAIReMetadata or all three sheet arguments "
+                "(--projectMetadata, --sampleMetadata, --experimentRunMetadata)."
+            )
+        if not has_workbook and not has_all_sheets:
+            parser.error(
+                "When using sheet arguments, all are required: "
+                "--projectMetadata, --sampleMetadata, --experimentRunMetadata."
+            )
         
-        # Check if files exist
-        for file_arg in ['FAIReMetadata', 'BioSampleTemplate']:
-            file_path = getattr(args, file_arg)
-            if not os.path.exists(file_path):
-                parser.error(f"File not found: {file_path}")
+        # Check if input files exist (template resolved inside biosample_mode)
+        if has_workbook:
+            if not os.path.exists(args.FAIReMetadata):
+                parser.error(f"File not found: {args.FAIReMetadata}")
+        else:
+            for p in sheet_args:
+                if not os.path.exists(p):
+                    parser.error(f"File not found: {p}")
         
         biosample_mode(args)
         
     elif selected_mode == 'SRA':
         # SRA mode validation
-        required_args = ['FAIReMetadata', 'SRA_Template', 'SRA_Metadata']
+        required_args = ['SRA_Metadata']
         missing_args = [arg for arg in required_args if not getattr(args, arg)]
         if missing_args:
             parser.error(f"SRA mode requires: --{', --'.join(missing_args)}")
+
+        has_workbook = bool(args.FAIReMetadata)
+        sheet_args = [
+            args.projectMetadata,
+            args.sampleMetadata,
+            args.experimentRunMetadata,
+        ]
+        has_any_sheet = any(bool(x) for x in sheet_args)
+        has_all_sheets = all(bool(x) for x in sheet_args)
+        if has_workbook and has_any_sheet:
+            parser.error(
+                "Use either --FAIReMetadata OR all three sheet arguments "
+                "(--projectMetadata, --sampleMetadata, --experimentRunMetadata), not both."
+            )
+        if not has_workbook and not has_any_sheet:
+            parser.error(
+                "Provide either --FAIReMetadata or all three sheet arguments "
+                "(--projectMetadata, --sampleMetadata, --experimentRunMetadata)."
+            )
+        if not has_workbook and not has_all_sheets:
+            parser.error(
+                "When using sheet arguments, all are required: "
+                "--projectMetadata, --sampleMetadata, --experimentRunMetadata."
+            )
         
-        # Check if files exist
-        for file_arg in ['FAIReMetadata', 'SRA_Template']:
-            file_path = getattr(args, file_arg)
-            if not os.path.exists(file_path):
-                parser.error(f"File not found: {file_path}")
+        # Check if input files exist (template resolved inside sra_mode)
+        if has_workbook:
+            if not os.path.exists(args.FAIReMetadata):
+                parser.error(f"File not found: {args.FAIReMetadata}")
+        else:
+            for p in sheet_args:
+                if not os.path.exists(p):
+                    parser.error(f"File not found: {p}")
         
         sra_mode(args)
     
     else:
-        parser.error("Please specify a mode: BioSamples or SRA")
+        parser.error("Please specify a mode: BioSample or SRA")
 
 
 if __name__ == '__main__':

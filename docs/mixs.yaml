@@ -12505,6 +12505,7 @@ slots:
       partial_match: true
   size_frac:
     annotations:
+      Preferred_unit: micrometer
       Expected_value: filter size value range
     description: Filtering pore size used in sample preparation
     title: size fraction selected

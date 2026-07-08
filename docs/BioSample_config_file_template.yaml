@@ -35,12 +35,14 @@ MANDATORY_FIELDS_HANDLING:
 # NUMERICAL COLUMNS WITH UNITS
 # =============================================================================
 # Unit configuration for numerical columns in BioSample metadata
+# Prefer MIxS Preferred_unit from docs/mixs.yaml when available ([Y/n], Y default)
 NUMERICAL_COLUMNS_WITH_UNITS:
+  'Use preferred unit UNIT for COLUMN_NAME? [Y/n]:': {}
   'Enter unit for COLUMN_NAME (or press Enter to skip):':
     'Enter unit for maximumDepthInMeters (or press Enter to skip):': 'm'
     'Enter unit for salinity (or press Enter to skip):': 'psu'
     'Enter unit for size_frac (or press Enter to skip):': 'micrometer'
-    'Enter unit for temp (or press Enter to skip):': 'degree celsius'
+    'Enter unit for temp (or press Enter to skip):': 'degree Celsius'
     'Enter unit for tot_depth_water_col (or press Enter to skip):': 'm'
 
 # =============================================================================

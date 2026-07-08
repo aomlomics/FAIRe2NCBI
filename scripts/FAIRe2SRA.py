@@ -127,22 +127,19 @@ def is_config_template_file(config_file_path, template_filename=SRA_CONFIG_TEMPL
 
 def prompt_config_source_choice():
     """
-    Ask whether to reuse a previous config, start from the template, or run interactively.
+    Ask whether to reuse a config file from a previous run.
 
     Returns:
-        str: One of 'previous', 'template', or 'interactive'
+        str: 'previous' or 'template' (template + interactive when answer is No)
     """
     choice = get_valid_user_choice(
-        "Do you want to use a config file from a previous run or use the template? "
-        "[previous/template/interactive]: ",
-        ['previous', 'template', 'interactive', 'p', 't', 'i'],
-        default='interactive'
+        "Do you want to use a config file from a previous run? [y/N]: ",
+        ['y', 'yes', 'n', 'no'],
+        default='n'
     )
-    if choice in ('p', 'previous'):
+    if choice in ('y', 'yes'):
         return 'previous'
-    if choice in ('t', 'template'):
-        return 'template'
-    return 'interactive'
+    return 'template'
 
 
 def prompt_previous_config_path():
@@ -1501,9 +1498,10 @@ def sra_mode(args):
                 print(f"Updated timestamp: {config['date_time']}")
             else:
                 print(f"Warning: Could not load config file {args.config_file}")
-                config = {}
-                config_file_path = get_config_file_path(args.SRA_Metadata)
-        elif config_source == 'template':
+                print("Falling back to template + interactive prompts.")
+                config_source = 'template'
+
+        if config_source == 'template':
             template_config = load_template_config()
             if template_config:
                 config = template_config.copy()
@@ -1527,9 +1525,10 @@ def sra_mode(args):
                 elif os.path.exists(config_file_path) and args.force:
                     print(f"Config file exists. Using --force flag: automatically overwriting {config_file_path}")
 
-                use_config_file = True
+                use_config_file = False  # Force interactive answers; template only seeds structure
                 is_template_config = True
-                print(f"Using template configuration. Will create new config file: {config_file_path}")
+                print(f"Using template as base. Interactive prompts will update: {config_file_path}")
+                print(f"Template file remains unchanged: {get_config_template_path()}")
                 config['command'] = ' '.join(sys.argv)
                 config['date_time'] = datetime.now().isoformat()
                 config['qa_pairs'] = []
@@ -1538,10 +1537,8 @@ def sra_mode(args):
                 print("Could not load template. Proceeding with interactive questions.")
                 config = {}
                 config_file_path = get_config_file_path(args.SRA_Metadata)
-        else:
-            print("Proceeding with interactive questions. Will create custom config file.")
-            config = {}
-            config_file_path = get_config_file_path(args.SRA_Metadata)
+                is_template_config = False
+                use_config_file = False
     
     # Initialize with basic run info if not present
     if 'command' not in config:

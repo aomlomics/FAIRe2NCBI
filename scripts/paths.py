@@ -9,9 +9,11 @@ NCBI_BIOSAMPLE_TEMPLATE_NAME = "NCBI_BioSample_Metadata_Template.tsv"
 NCBI_SRA_TEMPLATE_NAME = "NCBI_SRA_Metadata_Template.xlsx"
 BIOSAMPLE_CONFIG_TEMPLATE_NAME = "BioSample_config_file_template.yaml"
 SRA_CONFIG_TEMPLATE_NAME = "SRA_config_file_template.yaml"
+MIXS_YAML_NAME = "mixs.yaml"
 
 DEFAULT_BIOSAMPLE_TEMPLATE = DOCS_DIR / NCBI_BIOSAMPLE_TEMPLATE_NAME
 DEFAULT_SRA_TEMPLATE = DOCS_DIR / NCBI_SRA_TEMPLATE_NAME
+DEFAULT_MIXS_YAML = DOCS_DIR / MIXS_YAML_NAME
 
 
 def get_docs_path(filename: str) -> Path:

@@ -15,6 +15,7 @@ import re
 import sys
 import argparse
 from datetime import datetime
+from pathlib import Path
 import subprocess
 import warnings
 
@@ -45,6 +46,7 @@ except ImportError:
 from paths import (
     BIOSAMPLE_CONFIG_TEMPLATE_NAME,
     DEFAULT_BIOSAMPLE_TEMPLATE,
+    DEFAULT_MIXS_YAML,
     get_docs_path,
     resolve_input_path,
 )
@@ -87,22 +89,19 @@ def is_config_template_file(config_file_path, template_filename=BIOSAMPLE_CONFIG
 
 def prompt_config_source_choice():
     """
-    Ask whether to reuse a previous config, start from the template, or run interactively.
+    Ask whether to reuse a config file from a previous run.
 
     Returns:
-        str: One of 'previous', 'template', or 'interactive'
+        str: 'previous' or 'template' (template + interactive when answer is No)
     """
     choice = get_valid_user_choice(
-        "Do you want to use a config file from a previous run or use the template? "
-        "[previous/template/interactive]: ",
-        ['previous', 'template', 'interactive', 'p', 't', 'i'],
-        default='interactive'
+        "Do you want to use a config file from a previous run? [y/N]: ",
+        ['y', 'yes', 'n', 'no'],
+        default='n'
     )
-    if choice in ('p', 'previous'):
+    if choice in ('y', 'yes'):
         return 'previous'
-    if choice in ('t', 'template'):
-        return 'template'
-    return 'interactive'
+    return 'template'
 
 
 def prompt_previous_config_path():
@@ -232,6 +231,15 @@ def update_structured_config(config, question, answer):
         if 'Column FIELD_NAME is empty. Do you want to fill it with not collected, not applicable, or missing? (Or enter any other value, or leave blank to skip):' not in config['MANDATORY_FIELDS_HANDLING']:
             config['MANDATORY_FIELDS_HANDLING']['Column FIELD_NAME is empty. Do you want to fill it with not collected, not applicable, or missing? (Or enter any other value, or leave blank to skip):'] = {}
         config['MANDATORY_FIELDS_HANDLING']['Column FIELD_NAME is empty. Do you want to fill it with not collected, not applicable, or missing? (Or enter any other value, or leave blank to skip):'][question] = answer
+    elif "Use preferred unit" in question and "[Y/n]" in question:
+        if 'NUMERICAL_COLUMNS_WITH_UNITS' not in config:
+            config['NUMERICAL_COLUMNS_WITH_UNITS'] = {}
+        key = 'Use preferred unit UNIT for COLUMN_NAME? [Y/n]:'
+        if key not in config['NUMERICAL_COLUMNS_WITH_UNITS']:
+            config['NUMERICAL_COLUMNS_WITH_UNITS'][key] = {}
+        if config['NUMERICAL_COLUMNS_WITH_UNITS'][key] is None:
+            config['NUMERICAL_COLUMNS_WITH_UNITS'][key] = {}
+        config['NUMERICAL_COLUMNS_WITH_UNITS'][key][question] = answer
     elif "Enter unit for" in question and "skip" in question:
         if 'NUMERICAL_COLUMNS_WITH_UNITS' not in config:
             config['NUMERICAL_COLUMNS_WITH_UNITS'] = {}
@@ -464,6 +472,7 @@ def save_config(config, config_file_path):
                 'Column FIELD_NAME is empty. Do you want to fill it with not collected, not applicable, or missing? (Or enter any other value, or leave blank to skip):': {}
             },
             'NUMERICAL_COLUMNS_WITH_UNITS': {
+                'Use preferred unit UNIT for COLUMN_NAME? [Y/n]:': {},
                 'Enter unit for COLUMN_NAME (or press Enter to skip):': {}
             },
             'DUPLICATE_ROW_CHECKING': {
@@ -555,6 +564,13 @@ def save_config(config, config_file_path):
                 if not isinstance(structured_config['MANDATORY_FIELDS_HANDLING']['Column FIELD_NAME is empty. Do you want to fill it with not collected, not applicable, or missing? (Or enter any other value, or leave blank to skip):'], dict):
                     structured_config['MANDATORY_FIELDS_HANDLING']['Column FIELD_NAME is empty. Do you want to fill it with not collected, not applicable, or missing? (Or enter any other value, or leave blank to skip):'] = {}
                 structured_config['MANDATORY_FIELDS_HANDLING']['Column FIELD_NAME is empty. Do you want to fill it with not collected, not applicable, or missing? (Or enter any other value, or leave blank to skip):'][question] = answer
+            elif "Use preferred unit" in question and "[Y/n]" in question:
+                pref_key = 'Use preferred unit UNIT for COLUMN_NAME? [Y/n]:'
+                if pref_key not in structured_config['NUMERICAL_COLUMNS_WITH_UNITS']:
+                    structured_config['NUMERICAL_COLUMNS_WITH_UNITS'][pref_key] = {}
+                if not isinstance(structured_config['NUMERICAL_COLUMNS_WITH_UNITS'][pref_key], dict):
+                    structured_config['NUMERICAL_COLUMNS_WITH_UNITS'][pref_key] = {}
+                structured_config['NUMERICAL_COLUMNS_WITH_UNITS'][pref_key][question] = answer
             elif "Enter unit for" in question and "skip" in question:
                 # Store in the unit values dictionary
                 if not isinstance(structured_config['NUMERICAL_COLUMNS_WITH_UNITS']['Enter unit for COLUMN_NAME (or press Enter to skip):'], dict):
@@ -784,6 +800,13 @@ def find_answer_in_structured_config(config, question):
         if isinstance(field_values, dict):
             answer = field_values.get(question, '')
             return answer if answer != '' else None
+    elif "Use preferred unit" in question and "[Y/n]" in question:
+        pref_values = config.get('NUMERICAL_COLUMNS_WITH_UNITS', {}).get(
+            'Use preferred unit UNIT for COLUMN_NAME? [Y/n]:', {}
+        )
+        if isinstance(pref_values, dict):
+            answer = pref_values.get(question, '')
+            return answer if answer != '' else None
     elif "Enter unit for" in question and "skip" in question:
         # Look in the unit values dictionary
         unit_values = config.get('NUMERICAL_COLUMNS_WITH_UNITS', {}).get('Enter unit for COLUMN_NAME (or press Enter to skip):', {})
@@ -944,6 +967,9 @@ NON_MEASUREMENT_FAIRE_COLUMNS = frozenset({
     'filter_name',
     'sample_derived_from',
     'sample_composed_of',
+    'samp_store_dur',
+    'samp_store_loc',
+    'samp_store_sol',
 })
 
 NON_MEASUREMENT_MIMARKS_COLUMNS = frozenset({
@@ -955,7 +981,112 @@ NON_MEASUREMENT_MIMARKS_COLUMNS = frozenset({
     '*collection_date',
     'bioproject_accession',
     'source_material_id',
+    'samp_store_dur',
+    'samp_store_loc',
+    'samp_store_sol',
 })
+
+# Cached MIxS Preferred_unit lookup: slot_name -> list of preferred unit strings
+_MIXS_PREFERRED_UNITS_CACHE = None
+
+
+def load_mixs_preferred_units(mixs_path=None):
+    """Load Preferred_unit annotations from docs/mixs.yaml slots."""
+    global _MIXS_PREFERRED_UNITS_CACHE
+    if _MIXS_PREFERRED_UNITS_CACHE is not None:
+        return _MIXS_PREFERRED_UNITS_CACHE
+
+    path = Path(mixs_path) if mixs_path else DEFAULT_MIXS_YAML
+    preferred = {}
+    if not path.is_file():
+        print(f"Warning: MIxS YAML not found at {path}; Preferred_unit lookup disabled.")
+        _MIXS_PREFERRED_UNITS_CACHE = preferred
+        return preferred
+
+    try:
+        if YAML_AVAILABLE:
+            with open(path, 'r', encoding='utf-8') as f:
+                mixs_data = yaml.safe_load(f) or {}
+            slots = mixs_data.get('slots', {}) or {}
+            for slot_name, slot_def in slots.items():
+                if not isinstance(slot_def, dict):
+                    continue
+                annotations = slot_def.get('annotations') or {}
+                if not isinstance(annotations, dict):
+                    continue
+                preferred_raw = annotations.get('Preferred_unit')
+                if not preferred_raw:
+                    continue
+                units = [
+                    u.strip()
+                    for u in re.split(r'[,;]', str(preferred_raw))
+                    if u.strip()
+                ]
+                if units:
+                    preferred[slot_name] = units
+                    preferred[slot_name.lstrip('*')] = units
+        else:
+            # Lightweight fallback when PyYAML is not installed:
+            # parse top-level slot blocks and Preferred_unit lines.
+            current_slot = None
+            in_slots = False
+            with open(path, 'r', encoding='utf-8') as f:
+                for line in f:
+                    if not in_slots:
+                        if line.startswith('slots:'):
+                            in_slots = True
+                        continue
+                    # Next major top-level section ends slots (e.g. classes:)
+                    if re.match(r'^[A-Za-z_][A-Za-z0-9_]*:\s*$', line) and not line.startswith(' '):
+                        if line.strip() != 'slots:':
+                            break
+                    slot_match = re.match(r'^  ([A-Za-z_][A-Za-z0-9_]*):\s*$', line)
+                    if slot_match:
+                        current_slot = slot_match.group(1)
+                        continue
+                    if current_slot is None:
+                        continue
+                    pref_match = re.match(r'^\s+Preferred_unit:\s*(.+?)\s*$', line)
+                    if pref_match:
+                        preferred_raw = pref_match.group(1).strip().strip('"\'')
+                        units = [
+                            u.strip()
+                            for u in re.split(r'[,;]', preferred_raw)
+                            if u.strip()
+                        ]
+                        if units:
+                            preferred[current_slot] = units
+                            preferred[current_slot.lstrip('*')] = units
+    except Exception as e:
+        print(f"Warning: Could not load MIxS Preferred_unit values from {path}: {e}")
+
+    _MIXS_PREFERRED_UNITS_CACHE = preferred
+    return preferred
+
+
+def get_mixs_preferred_units(column_name, mixs_path=None):
+    """Return Preferred_unit list for a FAIRe or MIMARKS column name."""
+    lookup = load_mixs_preferred_units(mixs_path)
+    if not column_name:
+        return []
+    for key in (column_name, column_name.lstrip('*'), column_name.replace('*', '')):
+        if key in lookup:
+            return lookup[key]
+    return []
+
+
+def _looks_like_iso8601_duration(value_str):
+    """Detect ISO 8601 durations / ratios used by MIxS samp_store_dur (P1Y6M, P10M, P19M/35M)."""
+    s = value_str.strip().upper()
+    if not s:
+        return False
+    if re.fullmatch(
+        r'P(?:\d+Y)?(?:\d+M)?(?:\d+W)?(?:\d+D)?(?:T(?:\d+H)?(?:\d+M)?(?:\d+(?:\.\d+)?S)?)?'
+        r'(?:/P?(?:\d+Y)?(?:\d+M)?(?:\d+W)?(?:\d+D)?(?:T(?:\d+H)?(?:\d+M)?(?:\d+(?:\.\d+)?S)?)?)?',
+        s,
+    ):
+        return True
+    return bool(re.fullmatch(r'P?\d+[YMWD](?:/\d+[YMWD])+', s))
 
 
 def _cleaned_string_is_numeric(clean_value):
@@ -965,6 +1096,10 @@ def _cleaned_string_is_numeric(clean_value):
 
     # Python float() accepts underscores as digit separators (e.g. 9_20190715)
     if '_' in clean_value:
+        return False
+
+    # Reject slash-separated leftover tokens from durations (e.g. 19/35)
+    if '/' in clean_value:
         return False
 
     # Reject strings that still contain letters (e.g. hyphenated IDs)
@@ -978,50 +1113,70 @@ def _cleaned_string_is_numeric(clean_value):
         return False
 
 
+# FAIRe / NCBI placeholders for unavailable values — treat as empty for numeric detection
+_MISSING_VALUE_TOKENS = frozenset({
+    'not applicable',
+    'not collected',
+    'missing',
+    'na',
+    'n/a',
+    'none',
+})
+
+
+def _is_missing_value_token(value):
+    """Return True for blank or FAIRe/NCBI missing-value placeholders."""
+    if pd.isna(value):
+        return True
+    value_str = str(value).strip()
+    if not value_str:
+        return True
+    return value_str.casefold() in _MISSING_VALUE_TOKENS
+
+
 def is_numerical_column(df, column):
     """
-    Check if a column contains numerical values.
-    
-    Args:
-        df (pd.DataFrame): The dataframe containing the column
-        column (str): Column name to check
-    
-    Returns:
-        bool: True if column contains numerical values, False otherwise
+    Check if a column contains plain numerical measurement values.
+
+    FAIRe/NCBI placeholders (not applicable, not collected, missing, etc.) are ignored.
+    Rejects ISO 8601 durations (P10M, P19M/35M) and codes that only look numeric after
+    letter-stripping. Values must start with a digit (optional sign).
     """
     if column not in df.columns:
         return False
-    
-    # Get non-null values from the column
+
     values = df[column].dropna()
     if len(values) == 0:
         return False
-    
-    # Check if at least one value is numeric
+
+    numeric_found = False
     for value in values:
-        # Skip empty strings and None values
-        if pd.isna(value) or str(value).strip() == '':
+        if _is_missing_value_token(value):
             continue
-        
-        try:
-            # Try to convert to float, but also check if it's already a number
-            if isinstance(value, (int, float)):
-                return True
-            else:
-                # Remove common non-numeric characters that might be in the string
-                clean_value = str(value).strip()
-                # Remove common prefixes/suffixes that might indicate units
-                clean_value = re.sub(r'^[a-zA-Z\s]*', '', clean_value)
-                clean_value = re.sub(r'[a-zA-Z\s]*$', '', clean_value)
-                clean_value = clean_value.strip()
-                
-                if _cleaned_string_is_numeric(clean_value):
-                    return True
-        except (ValueError, TypeError):
+
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            numeric_found = True
             continue
-    
-    # If no numeric values found, return False
-    return False
+
+        value_str = str(value).strip()
+
+        if _looks_like_iso8601_duration(value_str):
+            return False
+
+        if '/' in value_str and re.search(r'[A-Za-z]', value_str):
+            return False
+
+        # Require leading digit/sign so "P10M" / "Control9" are not numeric
+        if not re.match(r'^[+-]?\d', value_str):
+            return False
+
+        # Allow trailing unit text only; do not strip leading letter prefixes
+        clean_value = re.sub(r'[a-zA-Z\s%°²³]+$', '', value_str).strip()
+        if not _cleaned_string_is_numeric(clean_value):
+            return False
+        numeric_found = True
+
+    return numeric_found
 
 
 def find_unit_column(sample_df, numerical_column):
@@ -1075,6 +1230,7 @@ def handle_numerical_columns_with_units(sample_df, output_df, mapping, config, u
         pd.DataFrame: Updated output dataframe with units added to numerical values
     """
     print("\n=== Processing numerical columns and their units ===")
+    load_mixs_preferred_units()
     
     # Identify numerical columns in BioSampleMetadata that have corresponding columns in FAIReMetadata
     numerical_columns_to_process = []
@@ -1110,48 +1266,79 @@ def handle_numerical_columns_with_units(sample_df, output_df, mapping, config, u
             
             # Add units to numerical values
             for i, value in enumerate(output_df[mimarks_col]):
-                if pd.notna(value) and str(value).strip() and str(value) != 'not collected':
-                    try:
-                        # Check if value is already numeric
-                        float(str(value))
-                        # Add unit to the value
-                        output_df.at[i, mimarks_col] = f"{value} {unit_value}"
-                    except ValueError:
-                        # Value is not numeric, leave as is
-                        continue
+                if _is_missing_value_token(value):
+                    continue
+                try:
+                    # Check if value is already numeric
+                    float(str(value))
+                    # Add unit to the value
+                    output_df.at[i, mimarks_col] = f"{value} {unit_value}"
+                except ValueError:
+                    # Value is not numeric, leave as is
+                    continue
         else:
             print(f"  No unit column found for {sample_col}")
-            
-            # Ask user for unit
-            unit_input = get_config_value(
-                config,
-                f'unit_for_{sample_col}',
-                input,
-                f"  Enter unit for {sample_col} (or press Enter to skip): ",
-                use_config_file,
-                f"  Enter unit for {sample_col} (or press Enter to skip): "
-            ).strip()
-            
-            if not unit_input:
+
+            preferred_units = (
+                get_mixs_preferred_units(sample_col)
+                or get_mixs_preferred_units(mimarks_col)
+            )
+            preferred_unit = preferred_units[0] if preferred_units else None
+            chosen_unit = None
+
+            if preferred_unit:
+                alt_note = ''
+                if len(preferred_units) > 1:
+                    alt_note = f" (alternatives: {', '.join(preferred_units[1:])})"
+                print(f"  MIxS Preferred_unit for '{sample_col}': {preferred_unit}{alt_note}")
+                use_preferred = get_config_value(
+                    config,
+                    f'use_mixs_preferred_unit_{sample_col}',
+                    get_valid_user_choice,
+                    f"  Use preferred unit '{preferred_unit}' for {sample_col}? [Y/n]: ",
+                    use_config_file,
+                    f"  Use preferred unit '{preferred_unit}' for {sample_col}? [Y/n]: ",
+                    ["y", "yes", "n", "no"],
+                    default="y"
+                )
+                if use_preferred in ('y', 'yes'):
+                    chosen_unit = preferred_unit
+                else:
+                    print(f"  Preferred unit declined for {sample_col}.")
+            else:
+                print(f"  No MIxS Preferred_unit found for '{sample_col}' / '{mimarks_col}'.")
+
+            if chosen_unit is None:
+                unit_input = get_config_value(
+                    config,
+                    f'unit_for_{sample_col}',
+                    input,
+                    f"  Enter unit for {sample_col} (or press Enter to skip): ",
+                    use_config_file,
+                    f"  Enter unit for {sample_col} (or press Enter to skip): "
+                ).strip()
+                if unit_input:
+                    if re.match(r'^[a-zA-Z0-9/%°\s()²³⁻¹⁻²⁻³µαβγδεθλπσφω]+$', unit_input):
+                        chosen_unit = unit_input
+                    else:
+                        print(
+                            "  Invalid unit format. Please use only letters, numbers, /, %, °, "
+                            "spaces, parentheses, superscripts, and Greek letters "
+                            "(e.g., mg/L, %, °C, m², mol/L, µm, α, β, γ)"
+                        )
+
+            if not chosen_unit:
                 print(f"  Skipping unit addition for {sample_col}")
             else:
-                # Validate unit input - allow common unit characters including spaces, parentheses, superscripts, and Greek letters
-                if re.match(r'^[a-zA-Z0-9/%°\s()²³⁻¹⁻²⁻³µαβγδεθλπσφω]+$', unit_input):
-                    print(f"  Adding unit '{unit_input}' to {sample_col}")
-                    
-                    # Add units to numerical values
-                    for i, value in enumerate(output_df[mimarks_col]):
-                        if pd.notna(value) and str(value).strip() and str(value) != 'not collected':
-                            try:
-                                # Check if value is already numeric
-                                float(str(value))
-                                # Add unit to the value
-                                output_df.at[i, mimarks_col] = f"{value} {unit_input}"
-                            except ValueError:
-                                # Value is not numeric, leave as is
-                                continue
-                else:
-                    print("  Invalid unit format. Please use only letters, numbers, /, %, °, spaces, parentheses, superscripts, and Greek letters (e.g., mg/L, %, °C, m², mol/L, µm, α, β, γ)")
+                print(f"  Adding unit '{chosen_unit}' to {sample_col}")
+                for i, value in enumerate(output_df[mimarks_col]):
+                    if _is_missing_value_token(value):
+                        continue
+                    try:
+                        float(str(value))
+                        output_df.at[i, mimarks_col] = f"{value} {chosen_unit}"
+                    except ValueError:
+                        continue
     
     print("=== Finished processing numerical columns and units ===\n")
     return output_df
@@ -1975,10 +2162,12 @@ def biosample_mode(args):
                 print(f"Updated timestamp: {config['date_time']}")
             else:
                 print(f"Warning: Could not load config file {args.config_file}")
-                config = {}
-                config_file_path = get_config_file_path(args.BioSample_Metadata)
-        elif config_source == 'template':
-            # Load template configuration
+                print("Falling back to template + interactive prompts.")
+                config_source = 'template'
+
+        if config_source == 'template':
+            # Load template, then run interactive prompts and write a new config
+            # next to the BioSample output (template itself is never modified).
             template_config = load_template_config()
             if template_config:
                 config = template_config.copy()
@@ -1997,9 +2186,10 @@ def biosample_mode(args):
                 elif os.path.exists(config_file_path) and args.force:
                     print(f"Config file exists. Using --force flag: automatically overwriting {config_file_path}")
 
-                use_config_file = True
+                use_config_file = False  # Force interactive answers; template only seeds structure
                 is_template_config = True
-                print(f"Using template configuration. Will create new config file: {config_file_path}")
+                print(f"Using template as base. Interactive prompts will update: {config_file_path}")
+                print(f"Template file remains unchanged: {get_config_template_path()}")
                 config['command'] = ' '.join(sys.argv)
                 config['date_time'] = datetime.now().isoformat()
                 config['qa_pairs'] = []
@@ -2008,10 +2198,8 @@ def biosample_mode(args):
                 print("Could not load template. Proceeding with interactive questions.")
                 config = {}
                 config_file_path = get_config_file_path(args.BioSample_Metadata)
-        else:
-            print("Proceeding with interactive questions. Will create custom config file.")
-            config = {}
-            config_file_path = get_config_file_path(args.BioSample_Metadata)
+                is_template_config = False
+                use_config_file = False
     
     # Initialize with basic run info if not present
     if 'command' not in config:

@@ -161,10 +161,13 @@ Bundled NCBI templates are resolved from the repo `docs/` folder automatically, 
 
 ### Template-Based Workflow
 
-1. **First prompt**: Choose a config from a previous run, start from the template, or answer interactively
-2. **Use Template**: Start with a configuration template to set default answers
-3. **Generate Config**: Script creates a new config file based on your output filename
-4. **Reuse Config**: Use the generated config file for consistent, automated processing
+1. **First prompt**: `Do you want to use a config file from a previous run? [y/N]:`
+   - **y**: provide a path to an existing config file
+   - **N** (default): load `docs/` config template as a base, answer interactively, and write a new config next to the output file (template is never modified)
+2. **Generate Config**: Script creates/updates a config file based on your output filename
+3. **Reuse Config**: Use the generated config file later for automated processing
+
+Numerical fields without a paired `*_unit` column ask whether to use the **MIxS Preferred_unit** from `docs/mixs.yaml` (`[Y/n]`, Y default); otherwise you can enter a custom unit.
 
 ### Configuration Templates
 

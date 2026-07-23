@@ -7,6 +7,8 @@
 Convert FAIRe metadata sheets (NOAA format) to NCBI BioSample and SRA submission templates with automated configuration management.
 
 ## Overview
+Need help running FAIRe2NCBI?  
+[![Watch tutorial on YouTube](https://img.shields.io/badge/YouTube-Watch%20the%20tutorial-FF0000?style=for-the-badge&logo=youtube&logoColor=white)](https://youtu.be/xyV6Mya_OYc?si=nf0TC23PXGKm7CFk)
 
 FAIRe2NCBI is a comprehensive toolkit for converting FAIRe (FAIR evironmental) metadata to NCBI submission formats. It provides two main conversion modes:
 
